@@ -87,4 +87,4 @@ detail that cost a 404 loop while writing this.
 
 ## License
 
-No license file yet — add one before redistributing.
+MIT — see [LICENSE](LICENSE).
