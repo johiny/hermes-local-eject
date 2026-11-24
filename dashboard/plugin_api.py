@@ -1,14 +1,16 @@
 """local-eject — backend half.
 
-Expulsa el modelo cargado del runtime llama.cpp gestionado por Hermes y, si
-hace falta, apaga el motor entero. Corre dentro del proceso del gateway, así
-que reutiliza el mismo supervisor que usa Settings → Local models (sin puertos
-ni api-keys inventados por el plugin).
+Ejects the model the managed llama.cpp runtime is holding and, when needed, turns the whole engine
+off. It runs inside the gateway process, so it reuses the supervisor Settings → Local models uses
+(no invented ports or api-keys).
 
-Rutas (montadas en /api/plugins/local-eject/):
-  GET  /state  -> {server, models, resident, vram}
-  POST /eject  -> {ok, ejected, vram_before_mb, vram_after_mb}
-  POST /stop   -> {ok}
+Routes (mounted at /api/plugins/local-eject/):
+  GET  /state      -> {server, models, resident, vram}
+  POST /mount      -> {ok, mounted}; fires the `before_load` lifecycle hooks first
+  POST /eject      -> {ok, ejected, vram_before_mb, vram_after_mb}
+  POST /stop       -> {ok}
+  GET  /hooks      -> configured lifecycle hooks and their most recent results
+  POST /hooks/run  -> {ok, results}; fire one event on demand (body: {event, model?})
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -30,6 +33,27 @@ from fastapi import APIRouter
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _hooks():
+    """Import `lifecycle_hooks.py` from the plugin root by path, cached.
+
+    The dashboard mounts this module under a name of its own choosing and `local-eject` is not a
+    valid Python identifier, so a relative import is not guaranteed here.
+    """
+    cached = sys.modules.get("local_eject_lifecycle_hooks")
+    if cached is not None:
+        return cached
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("local_eject_lifecycle_hooks", root / "lifecycle_hooks.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("lifecycle_hooks.py not found next to the plugin")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 _RESIDENT = ("loaded", "ready")
 _VRAM_TTL_S = 3.0
@@ -679,6 +703,12 @@ def mount(body: dict | None = None) -> dict[str, Any]:
                     return
             # Load through whichever client we actually have: the supervisor we just
             # booted, the one the gateway owns, or plain HTTP when there is none.
+            # `before_load` runs first: on a 24 GB card the model needs the VRAM another
+            # process (ComfyUI) may still be sitting on.
+            try:
+                _hooks().run("before_load", target)
+            except Exception as hook_exc:  # noqa: BLE001 - hooks are best-effort
+                logger.debug("local-eject: before_load hooks skipped (%s)", hook_exc)
             if sup is not None:
                 sup.load_model(target, timeout_s=900)
             else:
@@ -746,3 +776,32 @@ def stop() -> dict[str, Any]:
         return {"ok": True, "via": "pid", "pid": int(pid)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ── lifecycle hooks ──────────────────────────────────────────
+@router.get("/hooks")
+def hooks_status() -> dict[str, Any]:
+    """Configured hooks, the file they came from, and what fired recently."""
+    try:
+        return {"ok": True, **_hooks().status()}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/hooks/run")
+def hooks_run(body: dict | None = None) -> dict[str, Any]:
+    """Fire one event now — the manual test for "does ComfyUI really free the VRAM?".
+
+    Body: {"event": "before_load" | "after_load" | "after_unload", "model": "<optional id>"}
+    """
+    payload = body or {}
+    event = str(payload.get("event") or "before_load")
+    model = payload.get("model")
+    try:
+        module = _hooks()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"hooks module unavailable: {exc}"}
+    if event not in module.EVENTS:
+        return {"ok": False, "error": f"event must be one of {list(module.EVENTS)}"}
+    results = module.run(event, model)
+    return {"ok": True, "event": event, "results": results, "count": len(results)}

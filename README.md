@@ -38,6 +38,70 @@ profile whose model is local, or an explicit Mount. An empty router costs a coup
 CUDA context, not 20 GB of weights. (An `on_session_start` preload was prototyped and removed: the
 user decides when VRAM is spent.)
 
+## Lifecycle hooks — hand the GPU over
+
+24 GB cannot hold an image model and a video model at once, so the side that wants the card has to
+tell the other side to let go. Hooks are the switchboard: **user-defined HTTP calls** fired around a
+model load. Nothing is hard-coded to ComfyUI — every call comes from a file you edit.
+
+Config lives at `%LOCALAPPDATA%\hermes\local-eject\hooks.json` (Linux/macOS:
+`~/.hermes/local-eject/hooks.json`). It is created with the default example the first time the plugin
+runs. Override the path with `HERMES_LOCAL_EJECT_HOOKS=/abs/path/hooks.json`.
+
+```json
+{
+  "version": 1,
+  "poll_seconds": 5,
+  "events": {
+    "before_load": [
+      {
+        "name": "free-comfyui-vram",
+        "enabled": true,
+        "method": "POST",
+        "url": "http://127.0.0.1:8188/free",
+        "json": {"unload_models": true, "free_memory": true},
+        "timeout": 10,
+        "expect": [200, 204]
+      }
+    ],
+    "after_load": [],
+    "after_unload": []
+  }
+}
+```
+
+| event | when it fires |
+|---|---|
+| `before_load` | right before the plugin loads a model (`POST /mount`). This is the one that matters when ComfyUI is sitting on the VRAM llama.cpp is about to need |
+| `after_load` | when a model becomes resident — including loads this plugin did not start (a message hit `--models-autoload`) |
+| `after_unload` | when a model stops being resident |
+
+Per hook: `name`, `enabled` (default true), `method` (default POST), `url`, `json` (body),
+`headers`, `timeout` (default 10 s), `expect` (status codes; default any 2xx). A `{model}` placeholder
+inside any string value of `json` is replaced with the model id.
+
+Design rules, on purpose:
+
+- A failing hook is **logged, never raised**: a closed ComfyUI must not break a load. Measured: a dead
+  endpoint returns `ok:false` / `URLError: timed out` in its own timeout while the load proceeds.
+- Status is polled for `after_*` events instead of hooking the router, so autoload is covered too.
+- The config is re-read when its mtime changes — edit, save, no restart.
+
+Test it without touching a real workflow:
+
+```bash
+curl -s http://127.0.0.1:8642/api/plugins/local-eject/hooks | jq        # what is configured + recent results
+curl -s -X POST http://127.0.0.1:8642/api/plugins/local-eject/hooks/run \
+     -H 'Content-Type: application/json' -d '{"event":"before_load"}' | jq
+```
+
+> Heads-up: `POST /free` with `unload_models` frees ComfyUI's models. If you render **while** chatting
+> with a local model, that is exactly the hand-off you want; if ComfyUI is mid-job, it is not. Disable
+> the hook (`"enabled": false`) or move it to `after_load` if you would rather the chat model wait.
+
+YAML is accepted too (same schema, `events:` at the top) **only when the host interpreter has PyYAML** —
+the desktop ships one that does not, which is why JSON is the primary format.
+
 ## Install
 
 ```bash
