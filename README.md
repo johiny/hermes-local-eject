@@ -95,6 +95,27 @@ curl -s -X POST http://127.0.0.1:8642/api/plugins/local-eject/hooks/run \
      -H 'Content-Type: application/json' -d '{"event":"before_load"}' | jq
 ```
 
+### Editing the hooks in the app
+
+**Settings ▸ Plugins ▸ Local Eject → Lifecycle hooks** (the desktop half, `desktop/plugin.js`): one
+group per event, each hook with name, on/off, method (POST/GET), URL, timeout and JSON body. `+ Add
+hook` appends, `✕` removes, `Test` fires that event immediately and prints each hook's status (or its
+error) in the note line, and `Save hooks` writes the file through
+`POST /hooks/save` (validated: URL must be http(s), method from a fixed list, timeout 0.5–300 s,
+body must parse as JSON — the error names the offending hook).
+
+Two honest details:
+
+- Edits live in a **draft** inside the settings page; nothing is written until Save, so a half-typed
+  URL cannot break a load.
+- The section is served by a **new backend route**: until the gateway is restarted once after
+  installing this version, it renders "the hooks backend is not loaded yet" instead of an empty
+  list — an empty list would read as "my hooks are gone".
+
+Install the UI half by copying `desktop/plugin.js` to
+`%LOCALAPPDATA%\hermes\desktop-plugins\local-eject\plugin.js` (the app hot-reloads it within ~5 s;
+the repo copy is the source of truth, so keep them in sync).
+
 > Heads-up: `POST /free` with `unload_models` frees ComfyUI's models. If you render **while** chatting
 > with a local model, that is exactly the hand-off you want; if ComfyUI is mid-job, it is not. Disable
 > the hook (`"enabled": false`) or move it to `after_load` if you would rather the chat model wait.

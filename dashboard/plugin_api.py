@@ -788,6 +788,31 @@ def hooks_status() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/hooks/config")
+def hooks_config() -> dict[str, Any]:
+    """The editable tree the settings page renders (hooks exactly as stored)."""
+    try:
+        return {"ok": True, **_hooks().raw_config()}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/hooks/save")
+def hooks_save(body: dict | None = None) -> dict[str, Any]:
+    """Persist the hooks the settings page edited. Body: {events: {...}, poll_seconds?}"""
+    payload = body or {}
+    events = payload.get("events")
+    if not isinstance(events, dict):
+        return {"ok": False, "error": "events is required (object keyed by event name)"}
+    try:
+        saved = _hooks().save_config(events, payload.get("poll_seconds"))
+        return {"ok": True, **saved}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 @router.post("/hooks/run")
 def hooks_run(body: dict | None = None) -> dict[str, Any]:
     """Fire one event now — the manual test for "does ComfyUI really free the VRAM?".

@@ -265,6 +265,100 @@ def status() -> dict:
     }
 
 
+# ── editing (the settings page writes through here) ──────────
+_FIELDS = ("name", "enabled", "method", "url", "json", "headers", "timeout", "expect")
+_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+
+
+def raw_config() -> dict:
+    """The editable tree: hooks exactly as stored, for a settings page to render."""
+    config = load(force=True)
+    return {
+        "path": str(config_path()),
+        "version": config["version"],
+        "poll_seconds": config["poll_seconds"],
+        "events": {
+            event: [{key: hook[key] for key in _FIELDS if key in hook} for hook in config["events"][event]]
+            for event in EVENTS
+        },
+    }
+
+
+def save_config(events: dict, poll_seconds: float | None = None) -> dict:
+    """Validate and persist. Raises ValueError with a readable message on bad input.
+
+    Written to a temp file and `replace`d, so a crash mid-write cannot leave the plugin without a
+    config; the previous file is kept as `hooks.json.bak`.
+    """
+    if not isinstance(events, dict):
+        raise ValueError("events must be an object")
+    unknown = set(events) - set(EVENTS)
+    if unknown:
+        raise ValueError(f"unknown event(s): {', '.join(sorted(unknown))}")
+    cleaned: dict[str, list[dict]] = {}
+    for event in EVENTS:
+        hooks_in = events.get(event) or []
+        if not isinstance(hooks_in, list):
+            raise ValueError(f"{event} must be a list")
+        hooks_out = []
+        for index, hook in enumerate(hooks_in):
+            if not isinstance(hook, dict):
+                raise ValueError(f"{event}[{index}] must be an object")
+            url = str(hook.get("url") or "").strip()
+            if not url.lower().startswith(("http://", "https://")):
+                raise ValueError(f"{event}[{index}].url must start with http:// or https://")
+            method = str(hook.get("method") or "POST").upper()
+            if method not in _METHODS:
+                raise ValueError(f"{event}[{index}].method must be one of {', '.join(_METHODS)}")
+            body = hook.get("json")
+            if body is not None and not isinstance(body, (dict, list)):
+                raise ValueError(f"{event}[{index}].json must be an object or null")
+            try:
+                timeout = float(hook.get("timeout") or 10)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{event}[{index}].timeout must be a number") from exc
+            if not 0.5 <= timeout <= 300:
+                raise ValueError(f"{event}[{index}].timeout must be between 0.5 and 300 seconds")
+            expect = hook.get("expect") or []
+            if not isinstance(expect, list) or any(not isinstance(code, int) for code in expect):
+                raise ValueError(f"{event}[{index}].expect must be a list of status codes")
+            headers = hook.get("headers") or {}
+            if not isinstance(headers, dict):
+                raise ValueError(f"{event}[{index}].headers must be an object")
+            hooks_out.append(
+                {
+                    "name": str(hook.get("name") or url),
+                    "enabled": bool(hook.get("enabled", True)),
+                    "method": method,
+                    "url": url,
+                    "json": body,
+                    "headers": headers,
+                    "timeout": timeout,
+                    "expect": expect,
+                }
+            )
+        cleaned[event] = hooks_out
+
+    document = {
+        "version": 1,
+        "poll_seconds": float(poll_seconds or load()["poll_seconds"] or 5),
+        "events": cleaned,
+    }
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if path.exists():
+        try:
+            path.replace(path.with_suffix(path.suffix + ".bak"))
+        except OSError:
+            pass
+    tmp.replace(path)
+    load(force=True)
+    logger.info("hooks: saved %s (%s)", path, {event: len(hooks) for event, hooks in cleaned.items()})
+    return raw_config()
+
+
 # ── residency watcher (fires after_load / after_unload) ──────
 def _router_endpoint() -> tuple[str, str] | None:
     state = pathlib.Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "runtimes" / "llamacpp" / "server.json"
