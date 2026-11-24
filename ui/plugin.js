@@ -109,6 +109,7 @@ const MESSAGES = {
       'Empty = the localized default. Custom text and icons apply in every language.',
     'settings.reset': 'Reset to defaults',
     'hooks.title': "Lifecycle hooks",
+    'hooks.hint': "HTTP calls sent around a model load — before it loads, once it is loaded, and after it is unloaded. Add the endpoints your other apps need to hear about.",
     'hooks.needsRestart': "The hooks backend is not loaded yet — restart the gateway once to pick it up.",
     'hooks.save': "Save hooks",
     'hooks.saving': "Saving…",
@@ -195,6 +196,7 @@ const MESSAGES = {
       'Vacío = el texto traducido por defecto. El texto y los iconos propios valen para todos los idiomas.',
     'settings.reset': 'Restablecer',
     'hooks.title': "Hooks de ciclo de vida",
+    'hooks.hint': "Llamadas HTTP alrededor de una carga de modelo: antes de cargarlo, al terminar y después de expulsarlo. Añade los endpoints que tus otras apps necesiten escuchar.",
     'hooks.needsRestart': "El backend de hooks aún no está cargado — reinicia el gateway una vez para activarlo.",
     'hooks.save': "Guardar hooks",
     'hooks.saving': "Guardando…",
@@ -280,6 +282,7 @@ const MESSAGES = {
     'settings.overrideHint': '空欄なら言語ごとの既定値。独自のテキストとアイコンは全言語に適用されます。',
     'settings.reset': '既定に戻す',
     'hooks.title': "ライフサイクルフック",
+    'hooks.hint': "モデルの読み込み前・読み込み後・解放後に送る HTTP 呼び出しです。他のアプリに伝えたいエンドポイントを追加してください。",
     'hooks.needsRestart': "フックのバックエンドがまだ読み込まれていません — ゲートウェイを一度再起動してください。",
     'hooks.save': "フックを保存",
     'hooks.saving': "保存中…",
@@ -364,6 +367,7 @@ const MESSAGES = {
     'settings.overrideHint': '留空则使用对应语言的默认值。自定义文本和图标适用于所有语言。',
     'settings.reset': '恢复默认',
     'hooks.title': "生命周期钩子",
+    'hooks.hint': "在模型加载前、加载后和释放后发送的 HTTP 调用。添加你其他应用需要接收的端点。",
     'hooks.needsRestart': "钩子后端尚未加载——重启一次网关即可启用。",
     'hooks.save': "保存钩子",
     'hooks.saving': "保存中…",
@@ -1267,6 +1271,10 @@ function HooksSection({ ctx, t }) {
     className: 'flex flex-col gap-3 border-t border-(--border) pt-4',
     children: [
       jsx('div', { className: 'text-[0.8125rem] font-medium', children: t('hooks.title') }),
+      jsx('p', {
+        className: 'max-w-md text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+        children: t('hooks.hint')
+      }),
       ...HOOK_EVENTS.map(event =>
         jsxs(
           'div',
