@@ -1,0 +1,3 @@
+name: local-eject
+version: "1.0"
+description: Status-bar chip to eject the managed llama.cpp model (frees VRAM), plus boot and self-healing of the engine when its owning process dies.
