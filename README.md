@@ -112,9 +112,15 @@ Two honest details:
   installing this version, it renders "the hooks backend is not loaded yet" instead of an empty
   list — an empty list would read as "my hooks are gone".
 
-Install the UI half by copying `desktop/plugin.js` to
+Install the UI half by copying `ui/plugin.js` to
 `%LOCALAPPDATA%\hermes\desktop-plugins\local-eject\plugin.js` (the app hot-reloads it within ~5 s;
 the repo copy is the source of truth, so keep them in sync).
+
+> **Do not put it back under `desktop/`.** The desktop app treats `<package>/desktop/plugin.js` as
+> the UI half of a *unified package* and stamps `.hermes-package.json` next to the copy, which puts
+> the Python half in "installed-but-inert until allowlisted" posture — the chip and the settings page
+> vanish with no error in the logs. `ui/` is just a folder the app never looks for, so the plugin
+> stays standalone: agent half in `plugins/`, UI half in `desktop-plugins/`.
 
 > Heads-up: `POST /free` with `unload_models` frees ComfyUI's models. If you render **while** chatting
 > with a local model, that is exactly the hand-off you want; if ComfyUI is mid-job, it is not. Disable
