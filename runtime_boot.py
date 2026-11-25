@@ -148,6 +148,11 @@ def _heal_loop() -> None:
             logger.warning("runtime_boot: recovery failed: %s", exc)
 
 
+def _loop_running(name: str) -> bool:
+    """A reload re-imports this module, so the module-global guard resets — the thread name outlives it."""
+    return any(t.name == name and t.is_alive() for t in threading.enumerate())
+
+
 def start_once() -> None:
     """Start the boot/heal threads once per process. Never raises."""
     global _started
@@ -159,8 +164,9 @@ def start_once() -> None:
         logger.info("runtime_boot: disabled by HERMES_NO_LOCAL_RUNTIME_BOOT")
         return
     try:
-        threading.Thread(target=_boot, name="local-runtime-boot", daemon=True).start()
-        if _long_lived_host():
+        if not _loop_running("local-runtime-boot"):
+            threading.Thread(target=_boot, name="local-runtime-boot", daemon=True).start()
+        if _long_lived_host() and not _loop_running("local-runtime-heal"):
             threading.Thread(target=_heal_loop, name="local-runtime-heal", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("runtime_boot: could not start the threads: %s", exc)

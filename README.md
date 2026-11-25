@@ -72,7 +72,7 @@ runs. Override the path with `HERMES_LOCAL_EJECT_HOOKS=/abs/path/hooks.json`.
 
 | event | when it fires |
 |---|---|
-| `before_load` | right before the plugin loads a model (`POST /mount`). This is the one that matters when ComfyUI is sitting on the VRAM llama.cpp is about to need |
+| `before_load` | right before a local model starts loading: the plugin's own `POST /mount`, **and** any other trigger — the desktop model picker, `/model`, the CLI, cron, subagents — via the `pre_api_request` plugin hook, when the model is not resident yet. This is the one that matters when ComfyUI is sitting on the VRAM llama.cpp is about to need |
 | `after_load` | when a model becomes resident — including loads this plugin did not start (a message hit `--models-autoload`) |
 | `after_unload` | when a model stops being resident |
 
@@ -86,6 +86,29 @@ Design rules, on purpose:
   endpoint returns `ok:false` / `URLError: timed out` in its own timeout while the load proceeds.
 - Status is polled for `after_*` events instead of hooking the router, so autoload is covered too.
 - The config is re-read when its mtime changes — edit, save, no restart.
+
+### `before_load` from the native selector
+
+The chip's `/mount` fires the hooks itself. Everything else — the desktop model picker, `/model`, the
+CLI, cron, subagents — never touches this plugin's routes: the router boots with `--models-autoload`,
+so a model reaches the GPU as a side effect of the first `/v1/chat/completions` that names it, and
+Hermes has no call site that "loads" it.
+
+So the plugin hangs off the one place every turn passes through before its request goes out:
+the `pre_api_request` plugin hook (`native_load.py`). When that request targets the managed router
+and the model is not resident yet, `before_load` fires **synchronously**, before llama-server starts
+allocating.
+
+| property | value |
+|---|---|
+| gate | `provider` ∈ {`llamacpp`, `llama.cpp`, `llama-cpp`, `local`}, or a loopback `base_url` on the managed router's port (`server.json`, else `local_runtime.port`). LM Studio and other local engines are out of scope |
+| budget | 25 s inside the callback (the host abandons hook callbacks after 30 s) |
+| one shot | remembered per model for 120 s, re-armed as soon as the router reports it resident — retries, tool-loop iterations and post-compression re-sends do not re-free |
+| skipped when | the router already reports `loading` (freeing VRAM mid-allocation cannot help), the catalog is unreadable, or the request is remote |
+| cost | only the first message of a cold model waits for the hooks |
+
+`after_load` / `after_unload` need nothing extra: the residency watcher polls `/models`, so it sees
+native loads exactly like the chip's.
 
 Test it without touching a real workflow:
 
@@ -153,6 +176,7 @@ for the boot half to do anything.
 |---|---|
 | `HERMES_NO_LOCAL_RUNTIME_BOOT=1` | disables both boot and healing for this process |
 | `HERMES_NO_LOCAL_RUNTIME_PRELOAD=1` | reserved (no preload code ships today) |
+| `HERMES_LOCAL_EJECT_NATIVE=0` | disables the `pre_api_request` leg only: hooks fire from the chip's Mount, never from a native/CLI/cron load |
 
 ## Routes
 

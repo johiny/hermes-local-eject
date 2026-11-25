@@ -216,8 +216,14 @@ def _fire(hook: dict, model: str | None) -> dict:
     }
 
 
-def run(event: str, model: str | None = None) -> list[dict]:
-    """Fire every enabled hook of an event. Never raises."""
+def run(event: str, model: str | None = None, budget: float | None = None) -> list[dict]:
+    """Fire every enabled hook of an event. Never raises.
+
+    ``budget`` caps the wall-clock time this call may spend (seconds, ``None`` = unbounded). Once
+    the deadline passes the remaining hooks are recorded as skipped instead of fired: the caller is
+    a request path with a hard callback timeout above it, and a half-fired hook list is worse than
+    an honest skip.
+    """
     if event not in EVENTS:
         return []
     try:
@@ -225,9 +231,17 @@ def run(event: str, model: str | None = None) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("hooks: could not load the config (%s)", exc)
         return []
+    deadline = (time.monotonic() + budget) if budget else None
     results = []
     for hook in hooks:
         if not hook["enabled"]:
+            continue
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.info("hooks: %s/%s skipped (budget %.1fs exhausted)", event, hook["name"], budget)
+            results.append(
+                {"hook": hook["name"], "event": event, "ok": False, "status": None, "ms": 0,
+                 "error": f"budget of {budget:.1f}s exhausted", "skipped": True}
+            )
             continue
         result = _fire(hook, model)
         result["event"] = event
@@ -414,12 +428,18 @@ def _watch() -> None:
 
 
 def start_watcher() -> None:
-    """Start the residency watcher once per process. Never raises."""
+    """Start the residency watcher once per process. Never raises.
+
+    The module-global guard is reset by a plugin reload, so the thread name is the real lock: two
+    watchers in one process would fire every `after_*` event twice.
+    """
     global _watch_started
     with _watch_lock:
         if _watch_started:
             return
         _watch_started = True
+    if any(t.name == "local-eject-hooks" and t.is_alive() for t in threading.enumerate()):
+        return
     try:
         threading.Thread(target=_watch, name="local-eject-hooks", daemon=True).start()
         logger.debug("hooks: watcher started (config %s)", config_path())

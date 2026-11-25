@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from . import lifecycle_hooks, runtime_boot
+from . import lifecycle_hooks, native_load, runtime_boot
 
 PLUGIN_NAME = "local-eject"
 
@@ -27,8 +27,10 @@ runtime_boot.start_once()
 lifecycle_hooks.start_watcher()
 
 
-def register(ctx) -> None:  # noqa: ARG001 - the agent side registers no tools
-    """No tools: the chip is a dashboard route and the background loops start at import."""
+def register(ctx) -> None:
+    """One hook, no tools: the chip is a dashboard route and the loops start at import."""
     runtime_boot.start_once()
     lifecycle_hooks.start_watcher()
+    ctx.register_hook("pre_api_request", native_load.on_pre_api_request)
+    logger.info("local_eject: pre_api_request hook registered — native model loads fire before_load")
     return None

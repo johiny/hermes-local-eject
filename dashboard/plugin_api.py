@@ -55,6 +55,23 @@ def _hooks():
     spec.loader.exec_module(module)
     return module
 
+
+def _native():
+    """Import `native_load.py` (the `pre_api_request` half) by path, cached — same reason as above."""
+    cached = sys.modules.get("local_eject_native_load")
+    if cached is not None:
+        return cached
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("local_eject_native_load", root / "native_load.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("native_load.py not found next to the plugin")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 _RESIDENT = ("loaded", "ready")
 _VRAM_TTL_S = 3.0
 _vram_lock = threading.Lock()
@@ -781,11 +798,16 @@ def stop() -> dict[str, Any]:
 # ── lifecycle hooks ──────────────────────────────────────────
 @router.get("/hooks")
 def hooks_status() -> dict[str, Any]:
-    """Configured hooks, the file they came from, and what fired recently."""
+    """Configured hooks, the file they came from, what fired recently, and the native-selector leg."""
     try:
-        return {"ok": True, **_hooks().status()}
+        payload = {"ok": True, **_hooks().status()}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
+    try:
+        payload["native"] = _native().status()
+    except Exception as exc:  # noqa: BLE001 - the chip must still render without this leg
+        payload["native"] = {"enabled": False, "error": str(exc)}
+    return payload
 
 
 @router.get("/hooks/config")

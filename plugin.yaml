@@ -1,3 +1,5 @@
 name: local-eject
-version: "1.0"
-description: Status-bar chip to eject the managed llama.cpp model (frees VRAM), boot and self-healing of the engine, and user-defined HTTP lifecycle hooks (e.g. free ComfyUI before loading a model).
+version: "1.1"
+description: Status-bar chip to eject the managed llama.cpp model (frees VRAM), boot and self-healing of the engine, and user-defined HTTP lifecycle hooks (e.g. free ComfyUI before loading a model) — fired from the chip and from any native model load.
+provides_hooks:
+  - pre_api_request
